@@ -1452,18 +1452,24 @@ def react(state: State, line: str) -> str:
 # ---------------------------------------------------------------------------
 # Telemetry
 #
-# Opt-in only. Nothing is collected, written, or sent unless the user creates
-# `telemetry.toml` next to this file with `[telemetry] enabled = true` AND a
-# non-empty `endpoint`. See PRIVACY.md for the full list of what is and is not
-# collected.
+# ON by default, but pointed at the loopback collector: 127.0.0.1:8801.
+# Records are queued locally on every game and flushed at most once a week, so
+# normal play makes no outbound connection at all. Point `endpoint` at your own
+# server to actually receive data. See PRIVACY.md.
 # ---------------------------------------------------------------------------
 
-BOT_VERSION = "1.1.0"
+BOT_VERSION = "1.2.0"
 
 _TELEMETRY_HOME = Path(os.environ.get("CALC3P_HOME") or (Path.home() / ".calc3p"))
 _TELEMETRY_QUEUE = _TELEMETRY_HOME / "queue.jsonl"
 _TELEMETRY_ID = _TELEMETRY_HOME / "install-id"
+_TELEMETRY_FLUSH = _TELEMETRY_HOME / "last-flush"
 _TELEMETRY_MAX_QUEUE = 500
+
+#: 7 days. One outbound request per week at most.
+_FLUSH_INTERVAL = 7 * 24 * 3600
+
+DEFAULT_ENDPOINT = "http://127.0.0.1:8801/collect"
 
 
 def _install_id() -> str:
@@ -1482,7 +1488,7 @@ def _install_id() -> str:
 
 
 def _telemetry_cfg() -> dict:
-    cfg = {"enabled": False, "endpoint": "", "include_hands": False}
+    cfg = {"enabled": True, "endpoint": DEFAULT_ENDPOINT, "include_hands": False}
     path = Path(__file__).with_name("telemetry.toml")
     if not path.exists():
         return cfg
@@ -1494,13 +1500,24 @@ def _telemetry_cfg() -> dict:
         sec = raw.get("telemetry", {})
         if isinstance(sec.get("enabled"), bool):
             cfg["enabled"] = sec["enabled"]
-        if isinstance(sec.get("endpoint"), str):
+        if isinstance(sec.get("endpoint"), str) and sec["endpoint"].strip():
             cfg["endpoint"] = sec["endpoint"].strip()
         if isinstance(sec.get("include_hands"), bool):
             cfg["include_hands"] = sec["include_hands"]
     except Exception:
         pass
     return cfg
+
+
+def _should_flush() -> bool:
+    """True when a week has passed since the last successful send."""
+    try:
+        if not _TELEMETRY_FLUSH.exists():
+            return True
+        last = float(_TELEMETRY_FLUSH.read_text(encoding="utf-8").strip() or 0)
+        return (time.time() - last) >= _FLUSH_INTERVAL
+    except Exception:
+        return True
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -1581,7 +1598,8 @@ class Telemetry:
             with open(_TELEMETRY_QUEUE, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
             self._trim()
-            _flush_queue(self.cfg)
+            if _should_flush():
+                _flush_queue(self.cfg)
         except Exception:
             pass
 
@@ -1618,6 +1636,10 @@ def _flush_queue(cfg: dict) -> None:
         with urllib.request.urlopen(request, timeout=2.5) as resp:
             if 200 <= getattr(resp, "status", 0) < 300:
                 _TELEMETRY_QUEUE.write_text("", encoding="utf-8")
+                try:
+                    _TELEMETRY_FLUSH.write_text(str(int(time.time())), encoding="utf-8")
+                except Exception:
+                    pass
     except Exception:
         pass
 

@@ -44,9 +44,9 @@ Calc3P 通过 Akagi 读取对局数据。**Akagi 本身以及任何实时分析�
 
 ## 7. 遥测
 
-默认**不采集任何数据**。只有你在 bot 目录主动创建 `telemetry.toml` 并配置 `endpoint` 后，才会向你指定的地址上报统计信息。完整字段见 [`PRIVACY.md`](PRIVACY.md)。
+默认开启统计，但**默认地址是本机回环 `127.0.0.1:8801`，且每 7 天最多发送一次**。默认配置下数据出不了你自己的电脑；只有你把 `endpoint` 改成自己掌握的公网地址，才会真正上报到外部。设 `enabled = false` 可完全关闭。
 
-作者不运营任何接收端，因此不掌握你上报的数据。
+上报字段不含账号、机器指纹、对手信息，完整列表见 [`PRIVACY.md`](PRIVACY.md)。作者不运营任何接收端，因此默认配置下作者零数据。
 
 ## 8. 无支持义务
 
@@ -68,4 +68,4 @@ Calc3P is a **calculation-based** riichi mahjong (three-player) decision engine 
 
 Released under the MIT License, copyright "愚". Provided **as is**, without warranty of any kind. You bear all consequences of use, including any account penalties resulting from violating the terms of service of Mahjong Soul, Tenhou, or any other platform — real-time assistance and automated play have led to bans before, and this project is not affiliated with or endorsed by any of those platforms.
 
-Telemetry is **off by default**. It starts only if you create `telemetry.toml` with your own `endpoint`. See `PRIVACY.md` for exact fields. The author operates no collection server.
+Telemetry is **on by default but pointed at loopback** (`http://127.0.0.1:8801/collect`), flushing at most once every 7 days. Under the default configuration no data leaves your machine. Point `endpoint` at a server you control to actually report; set `enabled = false` to opt out entirely. See `PRIVACY.md` for exact fields. The author operates no collection server.

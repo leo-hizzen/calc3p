@@ -1,6 +1,7 @@
-# Copy this file to `telemetry.toml` ONLY if you want to share usage stats.
-# Delete it any time to stop immediately. See PRIVACY.md.
+# Optional. Calc3P already records stats locally and flushes at most once a week
+# to http://127.0.0.1:8801/collect (your own machine). Create this file only if
+# you want to send them somewhere else, or to turn telemetry off entirely.
 [telemetry]
 enabled = true
-endpoint = "https://your-host/collect"
+endpoint = "http://127.0.0.1:8801/collect"
 include_hands = false

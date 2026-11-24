@@ -4,5 +4,5 @@ manifest_version = 1
 name             = "calc3p"
 display          = "Calc 3P"
 description      = "Three-player bot driven by explicit calculation: shanten DP over the wall for win chance, exact hand value from the standard score table, and a genbutsu/suji/wall danger model. No neural network, no training, no GPU."
-version          = "1.1.0"
+version          = "1.2.0"
 supported_modes  = ["3p"]

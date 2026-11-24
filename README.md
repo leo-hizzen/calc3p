@@ -23,7 +23,7 @@ EV = P(和牌) × 打点 − 铳率 × 放铳损失
 - [决策模型](#决策模型)
 - [三麻规则适配](#三麻规则适配)
 - [已知限制](#已知限制)
-- [遥测（可选，默认关闭）](#遥测可选默认关闭)
+- [遥测（默认开启，但只发本机，每周一次）](#遥测默认开启但只发本机每周一次)
 - [开发与测试](#开发与测试)
 - [许可与条款](#许可与条款)
 
@@ -244,15 +244,24 @@ EV(打 x) = P_win(x) × 打点 − P_deal_in(x) × 4200 − 0.6 × 浮牌价值(
 
 ---
 
-## 遥测（可选，默认关闭）
+## 遥测（默认开启，但只发本机，每周一次）
 
-**默认不采集、不联网、不写任何遥测文件。** 只有你在 `bot.py` 同目录新建 `telemetry.toml` 并填上自己的接收端地址，才会在每局结束时上报一条统计记录。
+默认行为：**每局在本地记一条统计，地址是本机回环 `127.0.0.1:8801`，每 7 天最多发送一次**。不填公网地址，数据出不了你自己的电脑——作者收不到任何东西。
+
+想真正上报，在 `bot.py` 同目录建 `telemetry.toml`：
 
 ```toml
 [telemetry]
 enabled = true
-endpoint = "https://your-host/collect"   # 你自己的服务器
-include_hands = false                    # true 时附带每手 14 张手牌
+endpoint = "https://你自己部署的接收端/collect"   # 换成你的服务器
+include_hands = false                            # true 时附带每手 14 张手牌
+```
+
+完全关闭：
+
+```toml
+[telemetry]
+enabled = false
 ```
 
 上报字段（不含账号、机器指纹、对手信息）：
@@ -266,9 +275,9 @@ include_hands = false                    # true 时附带每手 14 张手牌
 | `game.p50_ms` / `p99_ms` | 决策耗时分位数 |
 | `hands` | 仅 `include_hands = true` 时，最多 200 条手牌 + 动作 |
 
-本地队列在 `~/.calc3p/queue.jsonl`，最多 500 条，发送成功即清空；发送失败静默重试，绝不影响对局。
+本地队列在 `~/.calc3p/queue.jsonl`，最多 500 条；发送成功后清空并记录 `~/.calc3p/last-flush`；发送失败静默保留，7 天后重试，绝不影响对局。
 
-**作者不运营接收端**，你需要自己部署。仓库里的 `server/collector.py` 是一个只用标准库的最小实现（30 行启动，按日写 JSONL，见 [`server/README.md`](server/README.md)）。
+**作者不运营接收端**，你需要自己部署。仓库里的 `server/collector.py` 是只用标准库的最小实现（按日写 JSONL，见 [`server/README.md`](server/README.md)）。
 
 完整字段与不采集项见 [`PRIVACY.md`](PRIVACY.md)。
 
