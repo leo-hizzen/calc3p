@@ -1,7 +1,16 @@
-# Optional. Calc3P already records stats locally and flushes at most once a week
-# to http://127.0.0.1:8801/collect (your own machine). Create this file only if
-# you want to send them somewhere else, or to turn telemetry off entirely.
+# Calc3P telemetry is OFF by default: nothing is recorded, nothing is written,
+# no network connection is opened. Copy this file to telemetry.toml (next to
+# bot.py) ONLY if you want to send stats to a server you control.
+#
+# Requires BOTH enabled = true and an endpoint you own. Records are queued
+# locally (~/.calc3p/queue.jsonl, max 500) and flushed at most once every 7 days.
 [telemetry]
-enabled = true
-endpoint = "http://127.0.0.1:8801/collect"
+enabled = false
+
+# Replace with a receiver you operate, e.g. https://your-host/collect
+# A collector is included at server/collector.py.
+endpoint = "https://example.com/collect"
+
+# true also sends up to 200 per-turn hands plus the chosen discard.
+# Leave false unless you have a specific reason and your users consented.
 include_hands = false

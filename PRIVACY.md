@@ -1,12 +1,10 @@
 # 隐私政策 / Privacy Policy
 
-Calc3P v1.2.0 · 最后更新：2026-11-24
+Calc3P v1.2.1 · 最后更新：2026-11-24
 
 ## 一句话
 
-**默认开启统计，但默认地址是本机 `127.0.0.1:8801`，并且每 7 天最多发送一次。** 也就是说：不填公网地址，数据只在你自己的电脑上排队、发给你自己的本机端口（没人监听就静默丢弃），**作者收不到任何东西**。
-
-想真正上报给谁，就在 `telemetry.toml` 里把 `endpoint` 改成那台服务器的地址——这个动作必须由你来做。
+**默认关闭：不记录、不落盘、不打开任何网络连接。** 只有你自己在 `bot.py` 同目录创建 `telemetry.toml`，写入 `enabled = true` 和一个**你掌握的** `endpoint`，才会开始记录与上报。作者不运营任何收集服务器，也收不到任何数据。
 
 ---
 
@@ -16,17 +14,16 @@ Calc3P v1.2.0 · 最后更新：2026-11-24
 
 | 项 | 默认值 | 含义 |
 |---|---|---|
-| `enabled` | `true` | 每局结束在本地追加一条统计记录 |
-| `endpoint` | `http://127.0.0.1:8801/collect` | 只连本机回环地址，出不了这台机器 |
-| `include_hands` | `false` | 不上传手牌，只传计数器 |
-| 发送频率 | 每 7 天最多一次 | 由 `~/.calc3p/last-flush` 控制 |
+| `enabled` | `false` | 不记录、不写队列、不联网 |
+| `endpoint` | `http://127.0.0.1:8801/collect` | 仅作为示例值，未启用时不会用到 |
+| `include_hands` | `false` | 不带手牌，只传计数器 |
+| 发送频率 | 每 7 天最多一次 | 仅在启用后生效，由 `~/.calc3p/last-flush` 控制 |
 
 因此默认状态下：
 
-- 每局会写一行到 `~/.calc3p/queue.jsonl`（最多 500 行，超出丢最旧）；
-- 只有距上次**成功发送**满 7 天时，才会尝试一次 POST；
-- 若本机 8801 没有服务在听，这次 POST 直接失败、静默丢弃，队列保留，7 天后再试；
-- 不访问任何外部域名。
+- 不创建 `~/.calc3p/`，不写 `queue.jsonl`，不生成 `install-id`；
+- 不打开任何 socket，没有任何出站请求；
+- 对局行为与未安装遥测时完全一致。
 
 ## 2. 如何改成上报到自己的服务器
 
@@ -41,14 +38,16 @@ include_hands = false
 
 接收端可用仓库里的 `server/collector.py`，一行命令起服务，按 UTC 日期写 JSONL。
 
-## 3. 如何完全关闭
+## 3. 如何关闭
+
+默认就是关闭的，删掉 `telemetry.toml` 即回到关闭状态。若要保留文件但临时停用：
 
 ```toml
 [telemetry]
 enabled = false
 ```
 
-设置后：不写队列、不发请求、不留安装 ID。删掉 `telemetry.toml` 则回到默认（本机、每周一次）。
+设置后：不写队列、不发请求、不留安装 ID。
 
 ## 4. 发送内容
 
@@ -58,7 +57,7 @@ enabled = false
 |---|---|---|
 | `v` | 格式版本 | `1` |
 | `install_id` | 首次运行随机生成的 32 位十六进制串，存于 `~/.calc3p/install-id` | `4b0be5b9…` |
-| `bot_version` | 版本 | `1.2.0` |
+| `bot_version` | 版本 | `1.2.1` |
 | `python` | Python 版本 | `3.12.13` |
 | `os` | 系统标识 | `win32` |
 | `ts` | Unix 时间戳 | `1795485080` |
@@ -124,9 +123,9 @@ enabled = false
 
 # Privacy Policy (English summary)
 
-Telemetry is **on by default but pointed at loopback** (`http://127.0.0.1:8801/collect`) and flushes **at most once every 7 days**. Unless you replace `endpoint` with a server you control, the data never leaves your machine — the author receives nothing.
+Telemetry is **off by default**: nothing is recorded, no file is written, no socket is opened. It only starts if you create `telemetry.toml` next to `bot.py` with `enabled = true` and a `endpoint` you control. The author runs no collection server and receives nothing.
 
-Every finished game appends one local record to `~/.calc3p/queue.jsonl` (max 500 lines): a random per-install id, bot/Python/OS versions, timestamp, end reason, and per-game counters (decisions, errors, action histogram, p50/p99 latency). With `include_hands = true` it also includes up to 200 per-turn hands plus the chosen discard.
+Once enabled, every finished game appends one local record to `~/.calc3p/queue.jsonl` (max 500 lines): a random per-install id, bot/Python/OS versions, timestamp, end reason, and per-game counters (decisions, errors, action histogram, p50/p99 latency), flushed **at most once every 7 days**. With `include_hands = true` it also includes up to 200 per-turn hands plus the chosen discard.
 
 It never collects account names, opponent identities, IP addresses, machine fingerprints, cookies, or your saved game records.
 

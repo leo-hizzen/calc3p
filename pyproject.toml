@@ -1,6 +1,6 @@
 [project]
 name = "calc3p"
-version = "1.2.0"
+version = "1.2.2"
 description = "Calculation-based three-player mahjong bot for Akagi: shanten/ukeire, exact hand value, and an expected-value discard model. No neural network."
 readme = "README.md"
 requires-python = ">=3.12"

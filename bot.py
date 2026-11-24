@@ -321,7 +321,7 @@ def _win_probability(shanten: int, live_tiles: int, wall: int, turns: int) -> fl
     if shanten <= 0:
         p = min(1.0, live_tiles / wall)
         return min(0.95, (1.0 - (1.0 - p) ** turns) * 0.82)
-    base = {1: 0.42, 2: 0.28, 3: 0.17, 4: 0.10, 5: 0.06}.get(shanten, 0.02)
+    base = {1: 0.4327, 2: 0.2241, 3: 0.1120, 4: 0.0907, 5: 0.1311}.get(shanten, 0.02)
     ref = {1: 22.0, 2: 30.0, 3: 36.0}.get(shanten, 40.0)
     # Keep the live-tile factor near neutrality. A 0.35..1.5 window let a wide
     # 3-shanten beat a narrow 2-shanten on draw count alone; efficiency is
@@ -426,6 +426,13 @@ def _danger(state: "State", idx: int) -> float:
                         p = 0.035
                     else:
                         p = 0.02
+            elif idx in (0, 8):
+                # Nothing can wait on 1m/9m: in sanma no sequence uses the manzu
+                # suit, and unlike a live honour neither is a yaku for anybody.
+                # An opponent keeps one only for kokushi (rare) or as a spare
+                # terminal, so throwing it is the safest discard in the hand --
+                # safer than a guest wind, which somebody may still be hoarding.
+                p = 0.010
             else:
                 p = 0.025
         p_safe *= 1.0 - p
@@ -689,7 +696,11 @@ def _score_discard(state: State, idx: int, hand14: list[int]) -> Score:
         win_p = _win_probability(sh, live, wall, turns)
 
     # `danger` is already a probability: multiply it by the loss once.
-    ev = win_p * value - danger * 4200.0
+    # Fitted against mortal3p over 4564 free discards: 4200 priced a 1% deal-in
+    # risk at 42 expected points, far above what the rest of the model implies.
+    # That made the bot over-fold. 2291 was the best fit and is worth ~6.6pp of
+    # top-1 agreement on its own.
+    ev = win_p * value - danger * 2291.0
     # Lone honours are interchangeable to the shape search but not in value: a
     # dragon pair is a cheap yaku, your own wind can only be completed by you,
     # and the round wind is wanted by every seat too — so shed it first.
@@ -698,7 +709,7 @@ def _score_discard(state: State, idx: int, hand14: list[int]) -> Score:
         # shanten: moving 2-shanten to 1-shanten is worth roughly 400 points of
         # extra win expectation, so the whole structure table has to fit under
         # that or the bot plays keep-away instead of pushing the hand forward.
-        ev -= 0.6 * _float_value(state, idx, hand14)
+        ev -= 1.0813 * _float_value(state, idx, hand14)
     return Score(idx=idx, shanten=sh, live=live, win_p=win_p, value=value, danger=danger, ev=ev)
 
 
@@ -782,7 +793,11 @@ def _rank_scores(scores: list[Score]) -> list[Score]:
     """
     viable = [s for s in scores if s.live > 0] or scores
     best_sh = min(s.shanten for s in viable)
-    return sorted(viable, key=lambda s: (s.shanten != best_sh, -s.ev))
+    # Ties used to fall back on list order, i.e. on tile index. In the 64-game
+    # replay 109 discards (2.4pp of all points) tied exactly on EV, and every one
+    # of them was settled by which tile happened to come first. Prefer the discard
+    # that keeps more tiles live and risks less instead.
+    return sorted(viable, key=lambda s: (s.shanten != best_sh, -s.ev, -s.live, s.danger))
 
 
 def _float_value(state: "State", idx: int, hand14: list[int]) -> float:
@@ -809,8 +824,8 @@ def _float_value(state: "State", idx: int, hand14: list[int]) -> float:
         round_w = state.round_wind()
         seat_w = state.seat_wind()
         if idx >= 31 or idx == round_w or idx == seat_w:
-            return value + 900.0
-        return value + 600.0
+            return value + 666.90
+        return value + 614.56
     if n == 2:
         # A pair whose copies are also consumed by a finished sequence is really
         # "sequence member + one spare". Discarding one copy keeps the run alive,
@@ -821,13 +836,13 @@ def _float_value(state: "State", idx: int, hand14: list[int]) -> float:
         # is little to fall back on, so that copy is worth keeping.
         pairs = sum(1 for c in hand14 if c >= 2)
         if pairs == 1:
-            return value + 900.0
+            return value + 482.13
         if pairs == 2:
-            return value + 600.0
+            return value + 476.98
         # A third pair is still a live triplet/head candidate. Pricing it below an
         # isolated 2/8 (which was 400) made the bot break pairs while keeping dead
         # tiles -- the exact complaint that produced this branch.
-        return value + 450.0
+        return value + 473.79
     if n != 1:
         return value
 
@@ -840,38 +855,38 @@ def _float_value(state: "State", idx: int, hand14: list[int]) -> float:
         # honours by far the most: in 444 of the 1130 top-1 disagreements the bot
         # discarded a middle or terminal tile while mortal3p threw the honour.
         if idx >= 31:  # dragons: a pair is already a yaku, but a lone one is not
-            return value + 340.0
+            return value + 158.05
         if idx == round_w and idx == seat_w:
-            return value + 400.0  # double wind
+            return value + 303.95
         if idx == seat_w:
-            return value + 330.0  # own wind: one pair and it is a yaku
+            return value + 172.34
         if idx == round_w:
-            return value + 200.0  # round wind: every opponent wants it as well
-        return value + 70.0  # guest wind: nearly worthless
+            return value + 167.10
+        return value + 94.64
 
     shape = _sequence_shape(hand14, idx)
     if shape == "ryanmen":
-        return value + 700.0  # 8 live tiles
+        return value + 625.19
     if shape == "kanchan":
-        return value + 450.0  # 4 live tiles, in the gap
+        return value + 441.53
     if shape == "penchan":
-        return value + 350.0  # 4 live tiles, one kind only
+        return value + 438.73
 
     r = idx % 9
     # Sanma keeps only 1m and 9m of the manzu suit, so neither can ever join a
     # sequence: an isolated one is worth about a guest wind, not a normal
     # terminal. 1p, by contrast, still grows on 2p/3p.
     if idx in (0, 8):
-        base = 150.0
+        base = 60.16
     elif 2 <= r <= 6:
-        base = 400.0  # 3-7: sequence core, but a lone copy still needs a partner
+        base = 300.03
     elif r in (1, 7):
-        base = 320.0  # 2 and 8: one direction left, weaker than 3-7
+        base = 226.82
     else:
-        base = 260.0  # terminals: pair or 123 only
+        base = 162.66
     # Neighbours mean the tile can still grow in more than one direction, which
     # the pairwise shape check above cannot see (e.g. 3345).
-    base += 60.0 * _neighbour_count(hand14, idx)
+    base += 69.59 * _neighbour_count(hand14, idx)
     return value + base
 
 
@@ -947,7 +962,7 @@ def _expected_han(state: "State", hand13: list[int]) -> float:
     # Baseline: a closed hand that gets there is almost always at least riichi
     # (1) plus menzen tsumo or pinfu (1) -- call it 2.5 to also cover the dora
     # that turn up. An open hand has already spent a yaku on the call.
-    han = 2.5 if state.is_closed() else 1.5
+    han = 1.9125 if state.is_closed() else 0.6915
 
     # Chinitsu (6 closed) / honitsu (3 closed): sanma hands collapse into one
     # suit far more often than in four-player mahjong.
@@ -1065,7 +1080,24 @@ def decide_after_own_tsumo(state: State, last: dict) -> dict:
                 continue
             test = list(hand14)
             test[i] = 0
-            if _shanten(test, len(state.melds) + 1) <= sh14:
+            # A kan is followed by a replacement draw from the dead wall, so the
+            # ten-tile remainder is not the hand that has to be evaluated: it is
+            # those ten plus whatever comes next. Measuring the bare ten made
+            # every kan look like a shanten step backwards, which is why a hand
+            # holding 1111s kept discarding out of the quad instead of kanning
+            # it the way the human replays did. Take the best replacement.
+            best_after = 9
+            for j in range(34):
+                if _is_dead_tile(j):
+                    continue
+                probe = list(test)
+                probe[j] += 1
+                s_after = _shanten(probe, len(state.melds) + 1)
+                if s_after < best_after:
+                    best_after = s_after
+                    if best_after <= sh14:
+                        break
+            if best_after <= sh14:
                 consumed = [_from34(i)] * 4
                 return {"type": "ankan", "actor": actor, "consumed": consumed}
 
@@ -1452,13 +1484,13 @@ def react(state: State, line: str) -> str:
 # ---------------------------------------------------------------------------
 # Telemetry
 #
-# ON by default, but pointed at the loopback collector: 127.0.0.1:8801.
-# Records are queued locally on every game and flushed at most once a week, so
-# normal play makes no outbound connection at all. Point `endpoint` at your own
-# server to actually receive data. See PRIVACY.md.
+# OFF by default. Nothing is recorded, nothing is written, no socket is opened
+# until you create a `telemetry.toml` next to bot.py with `enabled = true` and
+# an `endpoint` you control. When enabled, records are queued locally and
+# flushed at most once a week. See PRIVACY.md.
 # ---------------------------------------------------------------------------
 
-BOT_VERSION = "1.2.0"
+BOT_VERSION = "1.2.2"
 
 _TELEMETRY_HOME = Path(os.environ.get("CALC3P_HOME") or (Path.home() / ".calc3p"))
 _TELEMETRY_QUEUE = _TELEMETRY_HOME / "queue.jsonl"
@@ -1488,7 +1520,7 @@ def _install_id() -> str:
 
 
 def _telemetry_cfg() -> dict:
-    cfg = {"enabled": True, "endpoint": DEFAULT_ENDPOINT, "include_hands": False}
+    cfg = {"enabled": False, "endpoint": DEFAULT_ENDPOINT, "include_hands": False}
     path = Path(__file__).with_name("telemetry.toml")
     if not path.exists():
         return cfg
