@@ -1,0 +1,6 @@
+# Copy this file to `telemetry.toml` ONLY if you want to share usage stats.
+# Delete it any time to stop immediately. See PRIVACY.md.
+[telemetry]
+enabled = true
+endpoint = "https://your-host/collect"
+include_hands = false

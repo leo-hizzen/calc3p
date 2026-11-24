@@ -18,7 +18,11 @@ import json
 import math
 import os
 import sys
+import time
+import urllib.request
+import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from mahjong.constants import EAST, NORTH, SOUTH, WEST
 from mahjong.hand_calculating.hand import HandCalculator
@@ -1445,6 +1449,179 @@ def react(state: State, line: str) -> str:
     return json.dumps(action, separators=(",", ":"))
 
 
+# ---------------------------------------------------------------------------
+# Telemetry
+#
+# Opt-in only. Nothing is collected, written, or sent unless the user creates
+# `telemetry.toml` next to this file with `[telemetry] enabled = true` AND a
+# non-empty `endpoint`. See PRIVACY.md for the full list of what is and is not
+# collected.
+# ---------------------------------------------------------------------------
+
+BOT_VERSION = "1.1.0"
+
+_TELEMETRY_HOME = Path(os.environ.get("CALC3P_HOME") or (Path.home() / ".calc3p"))
+_TELEMETRY_QUEUE = _TELEMETRY_HOME / "queue.jsonl"
+_TELEMETRY_ID = _TELEMETRY_HOME / "install-id"
+_TELEMETRY_MAX_QUEUE = 500
+
+
+def _install_id() -> str:
+    """Random per-install id. No account, no machine fingerprint."""
+    try:
+        _TELEMETRY_HOME.mkdir(parents=True, exist_ok=True)
+        if _TELEMETRY_ID.exists():
+            cached = _TELEMETRY_ID.read_text(encoding="utf-8").strip()
+            if cached:
+                return cached
+        fresh = uuid.uuid4().hex
+        _TELEMETRY_ID.write_text(fresh, encoding="utf-8")
+        return fresh
+    except Exception:
+        return "unavailable"
+
+
+def _telemetry_cfg() -> dict:
+    cfg = {"enabled": False, "endpoint": "", "include_hands": False}
+    path = Path(__file__).with_name("telemetry.toml")
+    if not path.exists():
+        return cfg
+    try:
+        import tomllib
+
+        with open(path, "rb") as fh:
+            raw = tomllib.load(fh)
+        sec = raw.get("telemetry", {})
+        if isinstance(sec.get("enabled"), bool):
+            cfg["enabled"] = sec["enabled"]
+        if isinstance(sec.get("endpoint"), str):
+            cfg["endpoint"] = sec["endpoint"].strip()
+        if isinstance(sec.get("include_hands"), bool):
+            cfg["include_hands"] = sec["include_hands"]
+    except Exception:
+        pass
+    return cfg
+
+
+def _percentile(values: list[float], p: float) -> float:
+    ordered = sorted(values)
+    k = max(0, min(len(ordered) - 1, int(round((p / 100.0) * (len(ordered) - 1)))))
+    return ordered[k]
+
+
+def _hand_snapshot(state: "State") -> list[str]:
+    tiles: list[str] = []
+    for idx, count in enumerate(state.hand34):
+        if idx <= 33:
+            tiles.extend([_from34(idx)] * count)
+    return tiles
+
+
+class Telemetry:
+    """Per-game counters. A no-op unless opted in."""
+
+    def __init__(self, actor_id: int) -> None:
+        self.cfg = _telemetry_cfg()
+        self.job = bool(self.cfg["enabled"] and self.cfg["endpoint"])
+        self.actor = actor_id
+        self.decisions = 0
+        self.errors = 0
+        self.times_ms: list[float] = []
+        self.actions: dict[str, int] = {}
+        self.hands: list[dict] = []
+        self._started = 0.0
+
+    def tick(self) -> None:
+        self._started = time.perf_counter()
+
+    def record(self, action: dict) -> None:
+        self.decisions += 1
+        if self._started:
+            self.times_ms.append((time.perf_counter() - self._started) * 1000.0)
+            self._started = 0.0
+        name = str(action.get("type") or "none")
+        self.actions[name] = self.actions.get(name, 0) + 1
+
+    def note_hand(self, hand14: list[str], action: dict) -> None:
+        if not (self.job and self.cfg["include_hands"]):
+            return
+        if len(self.hands) >= 200:
+            return
+        self.hands.append({
+            "hand": hand14,
+            "action": {k: v for k, v in action.items() if k in ("type", "pai", "tsumogiri", "target")},
+        })
+
+    def error(self, exc: BaseException) -> None:
+        self.errors += 1
+
+    def finish(self, reason: str = "end_game") -> None:
+        if not self.job:
+            return
+        try:
+            record = {
+                "v": 1,
+                "install_id": _install_id(),
+                "bot_version": BOT_VERSION,
+                "python": "{}.{}.{}".format(*sys.version_info[:3]),
+                "os": sys.platform,
+                "ts": int(time.time()),
+                "reason": reason,
+                "game": {
+                    "decisions": self.decisions,
+                    "errors": self.errors,
+                    "actions": self.actions,
+                    "p50_ms": round(_percentile(self.times_ms, 50), 2) if self.times_ms else None,
+                    "p99_ms": round(_percentile(self.times_ms, 99), 2) if self.times_ms else None,
+                },
+            }
+            if self.cfg["include_hands"] and self.hands:
+                record["hands"] = self.hands
+            _TELEMETRY_HOME.mkdir(parents=True, exist_ok=True)
+            with open(_TELEMETRY_QUEUE, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+            self._trim()
+            _flush_queue(self.cfg)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _trim() -> None:
+        try:
+            lines = [ln for ln in _TELEMETRY_QUEUE.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            if len(lines) > _TELEMETRY_MAX_QUEUE:
+                _TELEMETRY_QUEUE.write_text(
+                    "\n".join(lines[-_TELEMETRY_MAX_QUEUE:]) + "\n", encoding="utf-8"
+                )
+        except Exception:
+            pass
+
+
+def _flush_queue(cfg: dict) -> None:
+    """Best-effort batch POST. Never raises, never blocks a game for long."""
+    try:
+        if not _TELEMETRY_QUEUE.exists():
+            return
+        lines = [ln for ln in _TELEMETRY_QUEUE.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not lines:
+            return
+        payload = ("[" + ",".join(lines) + "]").encode("utf-8")
+        request = urllib.request.Request(
+            cfg["endpoint"],
+            data=payload,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "calc3p/" + BOT_VERSION,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=2.5) as resp:
+            if 200 <= getattr(resp, "status", 0) < 300:
+                _TELEMETRY_QUEUE.write_text("", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _initial_actor_id() -> int:
     if len(sys.argv) > 1:
         try:
@@ -1469,16 +1646,29 @@ def main() -> None:
     except Exception:
         pass
     state = State(actor_id=_initial_actor_id())
+    telemetry = Telemetry(state.actor_id)
     for raw in sys.stdin:
         line = raw.strip()
         if not line:
             continue
+        hand_before = None
+        if telemetry.job and telemetry.cfg["include_hands"]:
+            hand_before = _hand_snapshot(state)
+        telemetry.tick()
         try:
             resp = react(state, line)
         except Exception as exc:  # never crash the loop
             sys.stderr.write(f"calc3p error: {exc}\n")
             sys.stderr.flush()
+            telemetry.error(exc)
             resp = '{"type":"none"}'
+        try:
+            action = json.loads(resp)
+        except Exception:
+            action = {"type": "none"}
+        telemetry.record(action)
+        if hand_before is not None and action.get("type") == "dahai":
+            telemetry.note_hand(hand_before, action)
         sys.stdout.write(resp + "\n")
         sys.stdout.flush()
         try:
@@ -1486,7 +1676,10 @@ def main() -> None:
         except Exception:
             continue
         if any(ev.get("type") == "end_game" for ev in evs):
+            telemetry.finish("end_game")
             break
+    else:
+        telemetry.finish("eof")
 
 
 if __name__ == "__main__":

@@ -23,8 +23,9 @@ EV = P(和牌) × 打点 − 铳率 × 放铳损失
 - [决策模型](#决策模型)
 - [三麻规则适配](#三麻规则适配)
 - [已知限制](#已知限制)
+- [遥测（可选，默认关闭）](#遥测可选默认关闭)
 - [开发与测试](#开发与测试)
-- [许可](#许可)
+- [许可与条款](#许可与条款)
 
 ---
 
@@ -243,6 +244,36 @@ EV(打 x) = P_win(x) × 打点 − P_deal_in(x) × 4200 − 0.6 × 浮牌价值(
 
 ---
 
+## 遥测（可选，默认关闭）
+
+**默认不采集、不联网、不写任何遥测文件。** 只有你在 `bot.py` 同目录新建 `telemetry.toml` 并填上自己的接收端地址，才会在每局结束时上报一条统计记录。
+
+```toml
+[telemetry]
+enabled = true
+endpoint = "https://your-host/collect"   # 你自己的服务器
+include_hands = false                    # true 时附带每手 14 张手牌
+```
+
+上报字段（不含账号、机器指纹、对手信息）：
+
+| 字段 | 内容 |
+|---|---|
+| `install_id` | 首次运行随机生成的 32 位十六进制串，可随时删除重置 |
+| `bot_version` / `python` / `os` | 版本信息 |
+| `reason` | 结束原因（`end_game` / `eof`） |
+| `game.decisions` / `errors` / `actions` | 本局决策数、异常数、动作分布 |
+| `game.p50_ms` / `p99_ms` | 决策耗时分位数 |
+| `hands` | 仅 `include_hands = true` 时，最多 200 条手牌 + 动作 |
+
+本地队列在 `~/.calc3p/queue.jsonl`，最多 500 条，发送成功即清空；发送失败静默重试，绝不影响对局。
+
+**作者不运营接收端**，你需要自己部署。仓库里的 `server/collector.py` 是一个只用标准库的最小实现（30 行启动，按日写 JSONL，见 [`server/README.md`](server/README.md)）。
+
+完整字段与不采集项见 [`PRIVACY.md`](PRIVACY.md)。
+
+---
+
 ## 开发与测试
 
 `bot.py` 单文件 1494 行，无内部模块拆分（Akagi 的 bot 契约要求单入口 `bot.py`）。
@@ -273,9 +304,12 @@ python test_calc3p.py      # 7 个场景、59 行输出，全部通过才算过
 
 ---
 
-## 许可
+## 许可与条款
 
 MIT License，见 [LICENSE](LICENSE)。
+
+- 使用条款：[TERMS.md](TERMS.md)
+- 隐私政策（遥测说明）：[PRIVACY.md](PRIVACY.md)
 
 依赖 [`mahjong`](https://github.com/MahjongRepository/mahjong)（MIT）。
 
